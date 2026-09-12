@@ -1,50 +1,55 @@
-FROM php:8.1-apache
+FROM node:20-alpine AS node_builder
+
+WORKDIR /app
+
+# Copy dependency files and install
+COPY package*.json ./
+RUN npm ci
+
+# Copy full application code and build assets
+COPY . .
+RUN npm run build || npm run prod
+
+FROM php:8.2-fpm
+
+# Install required system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    libpng-dev \
+    libonig-dev \
+    libxml2-dev \
+    libzip-dev \
+    zip \
+    unzip \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install required PHP extensions for Laravel
+RUN docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
+
+# Copy official Composer binary
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 # Set working directory
 WORKDIR /var/www
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libzip-dev \
-    libpng-dev \
-    libjpeg62-turbo-dev \
-    libxml2-dev \
-    wget \
-    zip \
-    unzip \
-    git \
-    curl \
-    && apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install PHP extensions required by Laravel/Unifiedtransform
-RUN docker-php-ext-install pdo_mysql zip exif pcntl
-RUN docker-php-ext-install gd && docker-php-ext-enable gd
-
-# Enable Apache mod_rewrite for Laravel routing
-RUN a2enmod rewrite
-
-# Configure Apache to serve from Laravel's /public folder
-ENV APACHE_DOCUMENT_ROOT /var/www/public
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/conf-available/*.conf
-
-# Install Composer
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
-
-# Copy application files into container
+# Copy application source code
 COPY . /var/www
 
-# Install Laravel dependencies
-RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs
+# Copy built frontend assets from Stage 1
+COPY --from=node_builder /app/public/build /var/www/public/build
 
-# Create necessary storage directories
-RUN mkdir -p /var/www/storage/app/purify
+# ---------------------------------------------------------------------
+# COMPOSER FIX: Install without scripts to prevent Auth::routes error
+# ---------------------------------------------------------------------
+RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs --no-scripts
+RUN composer dump-autoload --optimize
+# ---------------------------------------------------------------------
 
-# Set file permissions for web server
-RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
+# Set proper permissions for storage and cache directories
+RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache \
+    && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
 
-# Expose HTTP port
-EXPOSE 80
+EXPOSE 9000
 
-CMD ["apache2-foreground"]
+CMD ["php-fpm"]
