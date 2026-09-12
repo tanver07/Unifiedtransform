@@ -76,8 +76,8 @@ COPY . .
 # Copy compiled frontend assets from STAGE 1
 COPY --from=node_builder /app/public /var/www/public
 
-# Generate optimized Autoloader after copying source
-RUN composer dump-autoload --optimize
+# Generate optimized Autoloader without executing Artisan discovery scripts
+RUN composer dump-autoload --optimize --no-scripts
 
 # Set correct permissions for Laravel storage and cache directories
 RUN chown -R www-data:www-data /var/www \
