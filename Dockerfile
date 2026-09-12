@@ -1,67 +1,38 @@
 # ==============================================================================
-# STAGE 1: Build Frontend Assets (Node.js)
+# STAGE 1: Build Frontend Assets
 # ==============================================================================
 FROM node:20-alpine AS node_builder
 
 WORKDIR /app
 
-# Copy package management files (all secondary config files marked optional with *)
 COPY package*.json vite.config.js* mix-manifest.json* webpack.mix.js* ./
-
-# Install npm dependencies
 RUN npm ci || npm install
 
-# Copy application assets source files
 COPY resources/ ./resources/
 COPY public/ ./public/
-
-# Build production assets
 RUN npm run build || npm run prod
 
 
 # ==============================================================================
-# STAGE 2: PHP Application & Production Server
+# STAGE 2: Web Server (Nginx + PHP 8.2)
 # ==============================================================================
-FROM php:8.2-fpm-alpine
+FROM richarvey/nginx-php-fpm:latest
 
-# Install system dependencies & build tools for PHP extensions
-RUN apk add --no-cache \
-    bash \
-    curl \
-    libpng-dev \
-    libjpeg-turbo-dev \
-    freetype-dev \
-    libzip-dev \
-    oniguruma-dev \
-    icu-dev \
-    libxml2-dev \
-    git \
-    unzip \
-    zip
+# Environment config for Nginx-PHP image
+ENV WEBROOT="/var/www/html/public"
+ENV PHP_ERRORS_STDERR="1"
+ENV RUN_CLI="false"
+ENV REAL_IP_HEADER="1"
 
-# Configure and install PHP extensions required by Laravel
-RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
-    && docker-php-ext-install -j$(nproc) \
-        pdo_mysql \
-        mbstring \
-        exif \
-        pcntl \
-        bcmath \
-        gd \
-        zip \
-        intl \
-        opcache
+WORKDIR /var/www/html
 
-# Copy Composer binary from official Composer image
-COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
+# Copy application files
+COPY . .
 
-# Set working directory
-WORKDIR /var/www
+# Copy compiled frontend assets from STAGE 1
+COPY --from=node_builder /app/public /var/www/html/public
 
-# Copy Composer configuration first for better layer caching
-COPY composer.json composer.lock ./
-
-# Install Composer dependencies (no dev packages, optimized autoloader)
+# Install Composer dependencies
 RUN composer install \
     --no-dev \
     --no-interaction \
@@ -70,19 +41,14 @@ RUN composer install \
     --prefer-dist \
     --optimize-autoloader
 
-# Copy the rest of the application codebase
-COPY . .
-
-# Copy compiled frontend assets from STAGE 1
-COPY --from=node_builder /app/public /var/www/public
-
-# Generate optimized Autoloader without executing Artisan discovery scripts
+# Generate optimized Autoloader
 RUN composer dump-autoload --optimize --no-scripts
 
-# Set correct permissions for Laravel storage and cache directories
-RUN chown -R www-data:www-data /var/www \
-    && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
+# Set permissions for storage and cache
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache \
+    && chmod -R 775 /var/www/html/storage /var/www/html/bootstrap/cache
 
-EXPOSE 9000
+# Expose HTTP port for Render health checks
+EXPOSE 80
 
-CMD ["php-fpm"]
+CMD ["/start.sh"]
