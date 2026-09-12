@@ -5,8 +5,8 @@ FROM node:20-alpine AS node_builder
 
 WORKDIR /app
 
-# Copy package management files to leverage layer caching
-COPY package*.json vite.config.js mix-manifest.json* webpack.mix.js* ./
+# Copy package management files (all secondary config files marked optional with *)
+COPY package*.json vite.config.js* mix-manifest.json* webpack.mix.js* ./
 
 # Install npm dependencies
 RUN npm ci || npm install
@@ -15,7 +15,7 @@ RUN npm ci || npm install
 COPY resources/ ./resources/
 COPY public/ ./public/
 
-# Build production assets (Vite or Mix automatically handled if defined in scripts)
+# Build production assets
 RUN npm run build || npm run prod
 
 
@@ -25,7 +25,7 @@ RUN npm run build || npm run prod
 FROM php:8.2-fpm-alpine
 
 # Install system dependencies & build tools for PHP extensions
-RUN apk add --no-grad \
+RUN apk add --no-cache \
     bash \
     curl \
     libpng-dev \
@@ -83,7 +83,6 @@ RUN composer dump-autoload --optimize
 RUN chown -R www-data:www-data /var/www \
     && chmod -R 775 /var/www/storage /var/www/bootstrap/cache
 
-# Expose PHP-FPM default port
 EXPOSE 9000
 
 CMD ["php-fpm"]
