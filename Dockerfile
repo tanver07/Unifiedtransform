@@ -1,16 +1,10 @@
-FROM php:7.4-apache
+FROM php:8.1-apache
 
 # Set working directory
 WORKDIR /var/www
 
-# Fix EOL Debian repositories for PHP 7.4 (Buster)
-RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
-    sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
-    sed -i '/stretch-updates/d' /etc/apt/sources.list && \
-    sed -i '/buster-updates/d' /etc/apt/sources.list
-
 # Install system dependencies
-RUN apt-get update -o Acquire::Check-Valid-Until=false --fix-missing && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     build-essential \
     libzip-dev \
     libpng-dev \
@@ -36,13 +30,13 @@ RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-av
 RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/conf-available/*.conf
 
 # Install Composer
-COPY --from=composer:2.2 /usr/bin/composer /usr/bin/composer
+COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
 # Copy application files into container
 COPY . /var/www
 
 # Install Laravel dependencies
-RUN composer install --no-dev --optimize-autoloader
+RUN composer install --no-dev --optimize-autoloader --ignore-platform-reqs
 
 # Create necessary storage directories
 RUN mkdir -p /var/www/storage/app/purify
