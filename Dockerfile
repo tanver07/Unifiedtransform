@@ -1,60 +1,47 @@
-FROM php:7.4-fpm
-
-# Copy composer.lock and composer.json
-COPY composer.lock composer.json /var/www/
+FROM php:7.4-apache
 
 # Set working directory
 WORKDIR /var/www
 
-# Install dependencies
-# RUN apt-get update && apt-get install -y \
-#     build-essential \
-#     libpng-dev \
-#     libjpeg62-turbo-dev \
-#     libfreetype6-dev \
-#     locales \
-#     zip \
-#     jpegoptim optipng pngquant gifsicle \
-#     unzip \
-#     git \
-#     curl \
-#     libzip-dev
-
-RUN apt-get update && apt-get install -y \
+# Install system dependencies
+RUN apt-get update --fix-missing && apt-get install -y \
     build-essential \
     libzip-dev \
     libpng-dev \
     libjpeg62-turbo-dev \
-    libxml2 \
-    wget
+    libxml2-dev \
+    wget \
+    zip \
+    unzip \
+    git \
+    curl \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# RUN pecl install xdebug-2.9.2 \
-# 	&& docker-php-ext-enable xdebug \
-#     && echo "xdebug.remote_enable=1" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
-
-# Clear cache
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Install extensions
+# Install PHP extensions required by Laravel/Unifiedtransform
 RUN docker-php-ext-install pdo_mysql zip exif pcntl
 RUN docker-php-ext-install gd && docker-php-ext-enable gd
 
-# Install composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+# Enable Apache mod_rewrite for Laravel routing
+RUN a2enmod rewrite
 
-# Add user for laravel application
-RUN groupadd -g 1000 www
-RUN useradd -u 1000 -ms /bin/bash -g www www
+# Configure Apache to serve from Laravel's /public folder
+ENV APACHE_DOCUMENT_ROOT /var/www/public
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/conf-available/*.conf
 
-# Copy existing application directory contents
+# Install Composer
+COPY --from=composer:2.2 /usr/bin/composer /usr/bin/composer
+
+# Copy application files into container
 COPY . /var/www
 
-# Copy existing application directory permissions
-COPY --chown=www:www . /var/www
+# Install Laravel dependencies
+RUN composer install --no-dev --optimize-autoloader
 
-# Change current user to www
-USER www
+# Set file permissions for web server
+RUN chown -R www-data:www-data /var/www/storage /var/www/bootstrap/cache
 
-# Expose port 9000 and start php-fpm server
-EXPOSE 9000
-CMD ["php-fpm"]
+# Expose HTTP port
+EXPOSE 80
+
+CMD ["apache2-foreground"]
