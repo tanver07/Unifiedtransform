@@ -1,60 +1,42 @@
-FROM php:7.4-fpm
+FROM php:7.4-apache
 
-# Copy composer.lock and composer.json
-COPY composer.lock composer.json /var/www/
+# Install system dependencies and PHP extensions
+RUN apt-get update && apt-get install -y \
+    libpng-dev \
+    libonig-dev \
+    libxml2-dev \
+    zip \
+    unzip \
+    git \
+    curl \
+    libzip-dev \
+    && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd zip
+
+# Enable Apache Mod Rewrite
+RUN a2enmod rewrite
+
+# Set Apache Document Root to Laravel's public directory
+ENV APACHE_DOCUMENT_ROOT /var/www/html/public
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf
+RUN sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/conf-available/*.conf
 
 # Set working directory
-WORKDIR /var/www
+WORKDIR /var/www/html
 
-# Install dependencies
-# RUN apt-get update && apt-get install -y \
-#     build-essential \
-#     libpng-dev \
-#     libjpeg62-turbo-dev \
-#     libfreetype6-dev \
-#     locales \
-#     zip \
-#     jpegoptim optipng pngquant gifsicle \
-#     unzip \
-#     git \
-#     curl \
-#     libzip-dev
+# Copy application files
+COPY . /var/www/html
 
-RUN apt-get update && apt-get install -y \
-    build-essential \
-    libzip-dev \
-    libpng-dev \
-    libjpeg62-turbo-dev \
-    libxml2 \
-    wget
+# Create purify directory required by Unifiedtransform
+RUN mkdir -p /var/www/html/storage/app/purify
 
-# RUN pecl install xdebug-2.9.2 \
-# 	&& docker-php-ext-enable xdebug \
-#     && echo "xdebug.remote_enable=1" >> /usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
+# Install Composer
+COPY --from=composer:2.2 /usr/bin/composer /usr/bin/composer
+RUN composer install --no-dev --optimize-autoloader
 
-# Clear cache
-RUN apt-get clean && rm -rf /var/lib/apt/lists/*
+# Set permissions for storage and bootstrap/cache
+RUN chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache
 
-# Install extensions
-RUN docker-php-ext-install pdo_mysql zip exif pcntl
-RUN docker-php-ext-install gd && docker-php-ext-enable gd
+# Expose port
+EXPOSE 80
 
-# Install composer
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-
-# Add user for laravel application
-RUN groupadd -g 1000 www
-RUN useradd -u 1000 -ms /bin/bash -g www www
-
-# Copy existing application directory contents
-COPY . /var/www
-
-# Copy existing application directory permissions
-COPY --chown=www:www . /var/www
-
-# Change current user to www
-USER www
-
-# Expose port 9000 and start php-fpm server
-EXPOSE 9000
-CMD ["php-fpm"]
+CMD ["apache2-foreground"]
